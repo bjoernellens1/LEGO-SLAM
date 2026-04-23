@@ -1,4 +1,9 @@
 import os
+import json
+import platform
+import socket
+import getpass
+from datetime import datetime, timezone
 import torch
 import torch.multiprocessing as mp
 import torch.multiprocessing
@@ -49,13 +54,19 @@ class Mapper(SLAMParameters):
         super().__init__()
         self.dataset_path = slam.dataset_path
         self.output_path = slam.output_path
+        self.config = slam.config
         os.makedirs(self.output_path, exist_ok=True)
         self.verbose = slam.verbose
         self.keyframe_th = float(slam.keyframe_th)
         self.trackable_opacity_th = slam.trackable_opacity_th
+        self.overlapped_th = slam.overlapped_th
+        self.overlapped_th2 = slam.overlapped_th2
+        self.max_correspondence_distance = slam.max_correspondence_distance
         self.save_results = slam.save_results
         self.save_image_flag = slam.save_image_flag  # [enable, interval]
         self.rerun_viewer = slam.rerun_viewer
+        self.disable_embeddings = getattr(slam, "disable_embeddings", False)
+        self.use_embeddings = not self.disable_embeddings
         self.speedup = slam.speedup
         self.semantic_feature_init = slam.semantic_feature_init
         self.max_mapping_keyframes = slam.max_mapping_keyframes
@@ -72,6 +83,7 @@ class Mapper(SLAMParameters):
         self.encoder_warmup_iter = slam.encoder_warmup_iter
         self.encoder_train_interval = slam.encoder_train_interval
         self.encoder_train_duration = slam.encoder_train_duration
+        self.edge_weight = slam.edge_weight
         self.loopclosing_global_correspondence_distance = slam.loopclosing_global_correspondence_distance
         self.loopclosing_local_correspondence_distance = slam.loopclosing_local_correspondence_distance
         self.loop_constraint_noise = slam.loop_constraint_noise
@@ -202,6 +214,7 @@ class Mapper(SLAMParameters):
         self.n_trackable_keyframes = slam.n_trackable_keyframes
         self.loop_closing_start = slam.loop_closing_start
         self.pose_lr_rate = slam.pose_lr_rate
+        self.write_run_manifest()
         
         self.shared_cam = slam.shared_cam
         self.shared_new_points = slam.shared_new_points
@@ -322,6 +335,68 @@ class Mapper(SLAMParameters):
             print(f"Error loading codebook: {e}")
             self.vocabulary = None
             self.enable_loop_closing = False
+
+    def write_run_manifest(self):
+        self.run_datetime_utc = datetime.now(timezone.utc).isoformat()
+        self.run_datetime_local = datetime.now().astimezone().isoformat()
+        manifest = {
+            "run_datetime_utc": self.run_datetime_utc,
+            "run_datetime_local": self.run_datetime_local,
+            "dataset_path": self.dataset_path,
+            "config_path": self.config,
+            "output_path": self.output_path,
+            "cwd": os.getcwd(),
+            "user": getpass.getuser(),
+            "host": socket.gethostname(),
+            "platform": platform.platform(),
+            "python_version": platform.python_version(),
+            "python_executable": sys.executable,
+            "disable_embeddings": self.disable_embeddings,
+            "use_embeddings": self.use_embeddings,
+            "speedup": self.speedup,
+            "semantic_feature_init": self.semantic_feature_init,
+            "enable_loop_closing": self.enable_loop_closing,
+            "camera_parameters": self.camera_parameters,
+            "tuning": {
+                "keyframe_th": self.keyframe_th,
+                "trackable_opacity_th": self.trackable_opacity_th,
+                "max_mapping_keyframes": self.max_mapping_keyframes,
+                "post_training_iter": self.post_training_iter,
+                "eval_ratio": self.eval_ratio,
+                "dist_threshold": self.dist_threshold,
+                "sim_threshold": self.sim_threshold,
+                "max_sample_size": self.max_sample_size,
+                "sample_ratio": self.sample_ratio,
+                "k_nearest": self.k_nearest,
+                "loopclosing_global_correspondence_distance": self.loopclosing_global_correspondence_distance,
+                "loopclosing_local_correspondence_distance": self.loopclosing_local_correspondence_distance,
+                "loop_constraint_noise": self.loop_constraint_noise,
+                "n_trackable_keyframes": self.n_trackable_keyframes,
+                "pose_lr_rate": self.pose_lr_rate,
+                "downsample_rate": self.downsample_rate,
+                "overlapped_th": self.overlapped_th,
+                "overlapped_th2": self.overlapped_th2,
+                "max_correspondence_distance": self.max_correspondence_distance,
+                "edge_weight": self.edge_weight,
+            },
+        }
+
+        try:
+            if torch.cuda.is_available():
+                manifest["cuda"] = {
+                    "available": True,
+                    "device_count": torch.cuda.device_count(),
+                    "device_name": torch.cuda.get_device_name(0),
+                    "torch_cuda_version": torch.version.cuda,
+                }
+            else:
+                manifest["cuda"] = {"available": False}
+        except Exception as exc:
+            manifest["cuda"] = {"available": False, "error": str(exc)}
+
+        manifest_file = os.path.join(self.output_path, "run_manifest.json")
+        with open(manifest_file, "w") as f:
+            json.dump(manifest, f, indent=2, sort_keys=True)
     
     def assign_pixels_to_codebook(self, feature_tensor):
         """
@@ -449,7 +524,7 @@ class Mapper(SLAMParameters):
         
         points, colors, rots, scales, z_values, trackable_filter, zero_filter, edge_mask = self.shared_new_gaussians.get_values()
         
-        if self.semantic_feature_init:
+        if self.use_embeddings and self.semantic_feature_init:
             # Use preloaded semantic feature from SharedCam instead of loading from disk
             gt_semantic_feature = self.shared_cam.get_semantic_feature_cuda()
             semantic_feature_img = F.interpolate(gt_semantic_feature.float().unsqueeze(0), size=(self.H, self.W), mode='nearest').squeeze() 
@@ -507,7 +582,7 @@ class Mapper(SLAMParameters):
                 # get shared gaussians
                 points, colors, rots, scales, z_values, trackable_filter, zero_filter, edge_mask = self.shared_new_gaussians.get_values()
                 
-                if self.semantic_feature_init:
+                if self.use_embeddings and self.semantic_feature_init:
                     # Use preloaded semantic feature from SharedCam instead of loading from disk
                     gt_semantic_feature = self.shared_cam.get_semantic_feature_cuda()
                     semantic_feature_img = F.interpolate(gt_semantic_feature.float().unsqueeze(0), size=(self.H, self.W), mode='nearest').squeeze() 
@@ -780,7 +855,7 @@ class Mapper(SLAMParameters):
                 self.keyframe_idxs.append(newcam.cam_idx[0])
                 self.new_keyframes.append(len(self.mapping_cams)-1)
                 
-                if self.semantic_feature_init:
+                if self.use_embeddings and self.semantic_feature_init:
                     # Use preloaded semantic feature from SharedCam instead of loading from disk
                     gt_semantic_feature = self.shared_cam.get_semantic_feature_cuda()
                     semantic_feature_img = F.interpolate(gt_semantic_feature.float().unsqueeze(0), size=(self.H, self.W), mode='nearest').squeeze() 
@@ -845,33 +920,34 @@ class Mapper(SLAMParameters):
                 
                 gt_image = viewpoint_cam.original_image.cuda()
                 gt_depth_image = viewpoint_cam.original_depth_image.cuda()
-                # Use preloaded semantic feature instead of loading from disk
-                gt_semantic_feature = viewpoint_cam.get_semantic_feature_cuda()
+                gt_semantic_feature = None
 
                 self.training=True
                 render_pkg = render_3(viewpoint_cam, self.gaussians, self.pipe, self.background, training_stage=self.training_stage)
                 
                 depth_image = render_pkg["render_depth"]
                 image = render_pkg["render"]
-                semantic_feature = render_pkg["semantic_feature"]
+                semantic_feature = render_pkg["semantic_feature"] if self.use_embeddings else None
                 
                 mask = (gt_depth_image>0.)
                 mask = mask.detach()
                 gt_image = gt_image * mask
                 
-                ## feature interpolation
-                semantic_feature = F.interpolate(semantic_feature.unsqueeze(0), size=(gt_semantic_feature.shape[1], gt_semantic_feature.shape[2]), mode='bilinear', align_corners=True).squeeze(0)
-                # Store original 16D feature for encoder-decoder training
-                if self.speedup:
-                    semantic_feature_16d = semantic_feature.clone()
+                if self.use_embeddings:
+                    # Use preloaded semantic feature instead of loading from disk
+                    gt_semantic_feature = viewpoint_cam.get_semantic_feature_cuda()
+                    semantic_feature = F.interpolate(semantic_feature.unsqueeze(0), size=(gt_semantic_feature.shape[1], gt_semantic_feature.shape[2]), mode='bilinear', align_corners=True).squeeze(0)
+                    # Store original 16D feature for encoder-decoder training
+                    if self.speedup:
+                        semantic_feature_16d = semantic_feature.clone()
 
-                    if self.encoder_flag == 1:
-                        if not self.is_encoder_period():
-                            # Only decode to 512D when not in encoder-only periods
+                        if self.encoder_flag == 1:
+                            if not self.is_encoder_period():
+                                # Only decode to 512D when not in encoder-only periods
+                                semantic_feature = self.cnn_decoder(semantic_feature.unsqueeze(0)).squeeze(0)  # Decode to 512D
+                        else:
+                            # encoder_flag=0: always decode to 512D (no encoder training)
                             semantic_feature = self.cnn_decoder(semantic_feature.unsqueeze(0)).squeeze(0)  # Decode to 512D
-                    else:
-                        # encoder_flag=0: always decode to 512D (no encoder training)
-                        semantic_feature = self.cnn_decoder(semantic_feature.unsqueeze(0)).squeeze(0)  # Decode to 512D
                 
                 Ll1_map, Ll1 = l1_loss(image, gt_image)
                 L_ssim_map, L_ssim = ssim(image, gt_image)
@@ -882,40 +958,46 @@ class Mapper(SLAMParameters):
                 loss_d = Ll1_d
                 
                 # Feature loss calculation based on encoder_flag
-                if self.speedup:
-                    if self.encoder_flag == 1:
-                        if self.train_iter < self.encoder_warmup_iter:
-                            # Warming up: only decoder learning
-                            # Type 1: 512D decoded feature vs GT (decoder learning) - weight 1.0
-                            Ll1_feature_512d_map, Ll1_feature_512d = l1_loss(semantic_feature, gt_semantic_feature)
-                            Ll1_feature = Ll1_feature_512d
-                            loss = loss_rgb + 0.1*loss_d + Ll1_feature
-                        elif self.is_encoder_period():
-                            # Encoder-only periods
-                            # Type 2: 16D encoded GT vs rendered 16D (encoder learning) - weight 1.0
-                            # Convert GT to float32 and batch processing: [512,H,W] -> [1,512,H,W] -> [1,16,H,W] -> [16,H,W]
-                            gt_batch = gt_semantic_feature.float().unsqueeze(0)  # [1, 512, H, W] (convert to float32)
-                            gt_encoded_batch = self.cnn_encoder(gt_batch)        # Single conv operation!
-                            gt_semantic_encoded = gt_encoded_batch.squeeze(0)    # [16, H, W] (float32)
-                            Ll1_feature_16d_map, Ll1_feature_16d = l1_loss(semantic_feature_16d, gt_semantic_encoded)
-                            loss = Ll1_feature_16d
+                if self.use_embeddings:
+                    if self.speedup:
+                        if self.encoder_flag == 1:
+                            if self.train_iter < self.encoder_warmup_iter:
+                                # Warming up: only decoder learning
+                                # Type 1: 512D decoded feature vs GT (decoder learning) - weight 1.0
+                                Ll1_feature_512d_map, Ll1_feature_512d = l1_loss(semantic_feature, gt_semantic_feature)
+                                Ll1_feature = Ll1_feature_512d
+                                loss = loss_rgb + 0.1*loss_d + Ll1_feature
+                            elif self.is_encoder_period():
+                                # Encoder-only periods
+                                # Type 2: 16D encoded GT vs rendered 16D (encoder learning) - weight 1.0
+                                # Convert GT to float32 and batch processing: [512,H,W] -> [1,512,H,W] -> [1,16,H,W] -> [16,H,W]
+                                gt_batch = gt_semantic_feature.float().unsqueeze(0)  # [1, 512, H, W] (convert to float32)
+                                gt_encoded_batch = self.cnn_encoder(gt_batch)        # Single conv operation!
+                                gt_semantic_encoded = gt_encoded_batch.squeeze(0)    # [16, H, W] (float32)
+                                Ll1_feature_16d_map, Ll1_feature_16d = l1_loss(semantic_feature_16d, gt_semantic_encoded)
+                                loss = Ll1_feature_16d
+                            else:
+                                # Decoder periods: RGB + Depth + Decoder learning
+                                # Type 1: 512D decoded feature vs GT (decoder learning) - weight 1.0
+                                # semantic_feature is already decoded to 512D in non-encoder periods
+                                Ll1_feature_512d_map, Ll1_feature_512d = l1_loss(semantic_feature, gt_semantic_feature)
+                                Ll1_feature = Ll1_feature_512d
+                                loss = loss_rgb + 0.1*loss_d + Ll1_feature
                         else:
-                            # Decoder periods: RGB + Depth + Decoder learning
-                            # Type 1: 512D decoded feature vs GT (decoder learning) - weight 1.0
-                            # semantic_feature is already decoded to 512D in non-encoder periods
-                            Ll1_feature_512d_map, Ll1_feature_512d = l1_loss(semantic_feature, gt_semantic_feature)
-                            Ll1_feature = Ll1_feature_512d
+                            # Original speedup mode: only decoder learning 
+                            Ll1_feature_map, Ll1_feature = l1_loss(semantic_feature, gt_semantic_feature)
                             loss = loss_rgb + 0.1*loss_d + Ll1_feature
                     else:
-                        # Original speedup mode: only decoder learning 
+                        # Original loss for non-speedup mode
                         Ll1_feature_map, Ll1_feature = l1_loss(semantic_feature, gt_semantic_feature)
                         loss = loss_rgb + 0.1*loss_d + Ll1_feature
                 else:
-                    # Original loss for non-speedup mode
-                    Ll1_feature_map, Ll1_feature = l1_loss(semantic_feature, gt_semantic_feature)
-                    loss = loss_rgb + 0.1*loss_d + Ll1_feature
+                    loss = loss_rgb + 0.1*loss_d
 
-                del semantic_feature, gt_semantic_feature
+                if semantic_feature is not None:
+                    del semantic_feature
+                if gt_semantic_feature is not None:
+                    del gt_semantic_feature
 
                 loss.backward()
                 
@@ -929,7 +1011,10 @@ class Mapper(SLAMParameters):
                     valid_pro = total_filter.sum() / mask.sum()
                 
                     if self.train_iter % 200 == 0:
-                        self.gaussians.prune_large_transparent_and_lang(0.005, self.prune_th, self.dist_threshold, self.sim_threshold, self.max_sample_size, self.sample_ratio, self.k_nearest)
+                        if self.use_embeddings:
+                            self.gaussians.prune_large_transparent_and_lang(0.005, self.prune_th, self.dist_threshold, self.sim_threshold, self.max_sample_size, self.sample_ratio, self.k_nearest)
+                        else:
+                            self.gaussians.prune_large_and_transparent(0.005, self.prune_th)
 
                     if self.train_iter < self.encoder_warmup_iter or not self.is_encoder_period():
                         # Warming up OR Decoder periods: Update Gaussians with RGB+Depth+Decoder loss
@@ -1335,76 +1420,87 @@ class Mapper(SLAMParameters):
             eval_indices = self.keyframe_idxs
         
         # Create directories only if image saving is enabled
+        semantic_root = os.path.join(self.dataset_path, "rgb_feature_langseg")
+        semantic_eval_enabled = self.use_embeddings and os.path.isdir(semantic_root) and len(os.listdir(semantic_root)) > 0
+
         if self.save_image_flag[0] == 1:
             render_path_undistorted = os.path.join(self.output_path, "renders_undistorted")
-            feature_path = os.path.join(self.output_path, "feature_map")
-            gt_feature_path = os.path.join(self.output_path, "gt_feature_map")
             os.makedirs(render_path_undistorted, exist_ok=True)
-            os.makedirs(feature_path, exist_ok=True)
-            os.makedirs(gt_feature_path, exist_ok=True)
+            if semantic_eval_enabled:
+                feature_path = os.path.join(self.output_path, "feature_map")
+                gt_feature_path = os.path.join(self.output_path, "gt_feature_map")
+                os.makedirs(feature_path, exist_ok=True)
+                os.makedirs(gt_feature_path, exist_ok=True)
+            else:
+                feature_path = None
+                gt_feature_path = None
         else:
             render_path_undistorted = None
             feature_path = None
             gt_feature_path = None
 
-        ## semantic eval
-        module = LSegModule.load_from_checkpoint(
-            checkpoint_path="./Lseg/demo_e200.ckpt",
-            data_path="./",
-            dataset="ignore",
-            backbone="clip_vitl16_384",
-            aux="False",
-            num_features=256,
-            aux_weight=0,
-            se_loss=False,
-            se_weight=0,
-            base_lr=0,
-            batch_size=1,
-            max_epochs=0,
-            ignore_index=-1,
-            dropout=0.0,
-            scale_inv=False,
-            augment=False,
-            no_batchnorm=False,
-            widehead=True,
-            widehead_hr=False,
-            map_locatin="cpu",
-            arch_option=0,
-            strict=True,
-            block_depth=0,
-            activation="lrelu",
-        )
-        labels = module.get_labels('ade20k')
-        num_classes = len(labels)
-        input_transform = module.val_transform
-
-        if isinstance(module.net, BaseNet):
-            model = module.net
-        else:
-            model = module
-
-        model = model.eval()
-        model = model.cpu()
-
-        text = clip.tokenize(labels)
-        hooks = {
-                "clip_vitl16_384": [5, 11, 17, 23],
-                "clipRN50x16_vitl16_384": [5, 11, 17, 23],
-                "clip_vitb32_384": [2, 5, 8, 11],
-            }
-        clip_pretrained, pretrained = make_encoder(
-            "clip_vitl16_384",
-            features=256,
-            groups=1,
-            expand=False,
-            exportable=False,
-            hooks=hooks["clip_vitl16_384"],
-            use_readout="project",
+        if semantic_eval_enabled:
+            ## semantic eval
+            module = LSegModule.load_from_checkpoint(
+                checkpoint_path="./Lseg/demo_e200.ckpt",
+                data_path="./",
+                dataset="ignore",
+                backbone="clip_vitl16_384",
+                aux="False",
+                num_features=256,
+                aux_weight=0,
+                se_loss=False,
+                se_weight=0,
+                base_lr=0,
+                batch_size=1,
+                max_epochs=0,
+                ignore_index=-1,
+                dropout=0.0,
+                scale_inv=False,
+                augment=False,
+                no_batchnorm=False,
+                widehead=True,
+                widehead_hr=False,
+                map_locatin="cpu",
+                arch_option=0,
+                strict=True,
+                block_depth=0,
+                activation="lrelu",
             )
-        
-        text = text.cuda()
-        text_feature = clip_pretrained.encode_text(text)
-        logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07)).exp()
+            labels = module.get_labels('ade20k')
+
+            if isinstance(module.net, BaseNet):
+                model = module.net
+            else:
+                model = module
+
+            model = model.eval()
+            model = model.cpu()
+
+            text = clip.tokenize(labels)
+            hooks = {
+                    "clip_vitl16_384": [5, 11, 17, 23],
+                    "clipRN50x16_vitl16_384": [5, 11, 17, 23],
+                    "clip_vitb32_384": [2, 5, 8, 11],
+                }
+            clip_pretrained, pretrained = make_encoder(
+                "clip_vitl16_384",
+                features=256,
+                groups=1,
+                expand=False,
+                exportable=False,
+                hooks=hooks["clip_vitl16_384"],
+                use_readout="project",
+                )
+            
+            text = text.cuda()
+            text_feature = clip_pretrained.encode_text(text)
+            logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07)).exp()
+        else:
+            if self.use_embeddings:
+                print("Semantic evaluation skipped: rgb_feature_langseg is missing or empty")
+            else:
+                print("Semantic evaluation skipped: embeddings disabled")
 
         with torch.no_grad():
             # for i in tqdm(eval_indices):
@@ -1470,98 +1566,90 @@ class Mapper(SLAMParameters):
                 ssims += [ssim_error.detach().cpu()]
                 lpips_value = cal_lpips(gt_rgb_.unsqueeze(0), ours_rgb_.unsqueeze(0))
                 lpips += [lpips_value.detach().cpu()]
-                
-                gt_feature_map = load_semantic_feature(semantic_features_names[kf_idx]).cuda()
-                gt_feature_map = torch.nan_to_num(gt_feature_map, nan=0.0, posinf=0.0, neginf=0.0)
+                gt_feature_map = None
+                feature_map = None
+                if semantic_eval_enabled and os.path.isfile(semantic_features_names[kf_idx]):
+                    gt_feature_map = load_semantic_feature(semantic_features_names[kf_idx]).cuda()
+                    gt_feature_map = torch.nan_to_num(gt_feature_map, nan=0.0, posinf=0.0, neginf=0.0)
 
-                feature_map = render_pkg["semantic_feature"]
-                feature_map = torch.nan_to_num(feature_map, nan=0.0, posinf=0.0, neginf=0.0)
-                feature_map = F.interpolate(feature_map.unsqueeze(0), size=(gt_feature_map.shape[1], gt_feature_map.shape[2]), mode='bilinear', align_corners=True).squeeze(0)
-                if self.speedup:
-                    feature_map = self.cnn_decoder(feature_map)
+                    feature_map = render_pkg["semantic_feature"]
+                    feature_map = torch.nan_to_num(feature_map, nan=0.0, posinf=0.0, neginf=0.0)
+                    feature_map = F.interpolate(feature_map.unsqueeze(0), size=(gt_feature_map.shape[1], gt_feature_map.shape[2]), mode='bilinear', align_corners=True).squeeze(0)
+                    if self.speedup:
+                        feature_map = self.cnn_decoder(feature_map)
 
-                feashape = feature_map.shape # (512, 360, 480)
-                image_feature = feature_map.permute(1, 2, 0).reshape(-1, feashape[0]) # (172800, 512)
-                # Safe normalization: add epsilon to avoid division by zero
-                image_feature_norm = image_feature.norm(dim=-1, keepdim=True).to(torch.float32)
-                image_feature = image_feature / torch.clamp(image_feature_norm, min=1e-8)
-                text_feature = text_feature / torch.clamp(text_feature.norm(dim=-1, keepdim=True).to(torch.float32), min=1e-8)
+                    feashape = feature_map.shape # (512, 360, 480)
+                    image_feature = feature_map.permute(1, 2, 0).reshape(-1, feashape[0]) # (172800, 512)
+                    image_feature_norm = image_feature.norm(dim=-1, keepdim=True).to(torch.float32)
+                    image_feature = image_feature / torch.clamp(image_feature_norm, min=1e-8)
+                    text_feature = text_feature / torch.clamp(text_feature.norm(dim=-1, keepdim=True).to(torch.float32), min=1e-8)
 
+                    text_feature = text_feature.to(image_feature.device) # (150, 512)
+                    logit_scale = logit_scale.to(image_feature.device)
+                    logits_per_image = image_feature @ text_feature.t() # torch.Size([172800, 150]) logit_scale
+                    logits_per_image = logits_per_image.view(feashape[1], feashape[2], -1).permute(2, 0, 1)
+                    pred_image_text_feature = logits_per_image[None] # torch.Size([1, 150, 360, 480])
 
-                text_feature = text_feature.to(image_feature.device) # (150, 512)
-                logit_scale = logit_scale.to(image_feature.device)
-                logits_per_image = image_feature @ text_feature.t() # torch.Size([172800, 150]) logit_scale
-                logits_per_image = logits_per_image.view(feashape[1], feashape[2], -1).permute(2, 0, 1)
-                pred_image_text_feature = logits_per_image[None] # torch.Size([1, 150, 360, 480])
+                    feashape = gt_feature_map.shape # (512, 360, 480)
+                    image_feature = gt_feature_map.permute(1, 2, 0).reshape(-1, feashape[0]) # (172800, 512)
+                    image_feature_norm = image_feature.norm(dim=-1, keepdim=True).to(torch.float32)
+                    image_feature = image_feature / torch.clamp(image_feature_norm, min=1e-8)
+                    text_feature = text_feature / torch.clamp(text_feature.norm(dim=-1, keepdim=True).to(torch.float32), min=1e-8)
+                    text_feature = text_feature.to(image_feature.device) # (150, 512)
+                    logit_scale = logit_scale.to(image_feature.device)
+                    logits_per_image = image_feature @ text_feature.t() # torch.Size([172800, 150]) logit_scale
+                    logits_per_image = logits_per_image.view(feashape[1], feashape[2], -1).permute(2, 0, 1)
+                    gt_image_text_feature = logits_per_image[None] # torch.Size([1, 150, 360, 480])
+                    
+                    pred_predict = torch.max(pred_image_text_feature, 1)[1].cpu().numpy()
+                    gt_predict = torch.max(gt_image_text_feature, 1)[1].cpu().numpy()
 
-                feashape = gt_feature_map.shape # (512, 360, 480)
-                image_feature = gt_feature_map.permute(1, 2, 0).reshape(-1, feashape[0]) # (172800, 512)
-                # Safe normalization: add epsilon to avoid division by zero
-                image_feature_norm = image_feature.norm(dim=-1, keepdim=True).to(torch.float32)
-                image_feature = image_feature / torch.clamp(image_feature_norm, min=1e-8)
-                text_feature = text_feature / torch.clamp(text_feature.norm(dim=-1, keepdim=True).to(torch.float32), min=1e-8)
-                text_feature = text_feature.to(image_feature.device) # (150, 512)
-                logit_scale = logit_scale.to(image_feature.device)
-                logits_per_image = image_feature @ text_feature.t() # torch.Size([172800, 150]) logit_scale
-                logits_per_image = logits_per_image.view(feashape[1], feashape[2], -1).permute(2, 0, 1)
-                gt_image_text_feature = logits_per_image[None] # torch.Size([1, 150, 360, 480])
-                
-                pred_predict = torch.max(pred_image_text_feature, 1)[1].cpu().numpy()
-                gt_predict = torch.max(gt_image_text_feature, 1)[1].cpu().numpy()
+                    pred_mask = utils.get_mask_pallete(pred_predict - 1, 'detail')
+                    gt_mask = utils.get_mask_pallete(gt_predict - 1, 'detail')
+                    pred_mask = torch.tensor(np.array(pred_mask.convert("RGB"), "f")) / 255.0
+                    gt_mask = torch.tensor(np.array(gt_mask.convert("RGB"), "f")) / 255.0
+                    gt_mask = gt_mask.cpu().detach().numpy()
+                    pred_mask = pred_mask.cpu().detach().numpy()
 
-                pred_mask = utils.get_mask_pallete(pred_predict - 1, 'detail')
-                gt_mask = utils.get_mask_pallete(gt_predict - 1, 'detail')
-                # Visualize accumulated predictions
-                pred_mask = torch.tensor(np.array(pred_mask.convert("RGB"), "f")) / 255.0
-                gt_mask = torch.tensor(np.array(gt_mask.convert("RGB"), "f")) / 255.0
-                gt_mask = gt_mask.cpu().detach().numpy()
-                pred_mask = pred_mask.cpu().detach().numpy()
+                    for j in range(pred_predict.shape[1]):
+                        for k in range(pred_predict.shape[2]):
+                            for element in (pred_predict, gt_predict):
+                                if element[0][j][k] == 90:
+                                    element[0][j][k] = 15
+                                if element[0][j][k] == 29:
+                                    element[0][j][k] = 4
+                                if element[0][j][k] == 58:
+                                    element[0][j][k] = 40
 
-                for j in range(pred_predict.shape[1]):
-                    for k in range(pred_predict.shape[2]):
-                        for element in (pred_predict, gt_predict):
-                            # bed sofa cushion pillow = bed
-                            if element[0][j][k] == 90:  #TV to door
-                                element[0][j][k] = 15
-                            if element[0][j][k] == 29:  #rug to floor
-                                element[0][j][k] = 4
-                            if element[0][j][k] == 58:  #pillow to cushion
-                                element[0][j][k] = 40
+                    resized_mask = F.interpolate(gt_mask_torch[0].unsqueeze(0).unsqueeze(0), 
+                                 size=(119, 159), 
+                                 mode='nearest'
+                                ).squeeze().bool()
+                    resized_mask_np = resized_mask.cpu().numpy()
+                    resized_mask_np = np.expand_dims(resized_mask_np, axis=0)
 
-                resized_mask = F.interpolate(gt_mask_torch[0].unsqueeze(0).unsqueeze(0), 
-                             size=(119, 159), 
-                             mode='nearest'
-                            ).squeeze().bool()
-                resized_mask_np = resized_mask.cpu().numpy()
-                resized_mask_np = np.expand_dims(resized_mask_np, axis=0)
+                    gt_predict = torch.from_numpy(gt_predict).float()
+                    gt_predict = F.interpolate(gt_predict.unsqueeze(0), size=(119, 159), mode='nearest').squeeze(0)
+                    gt_predict = gt_predict.long().numpy()  # Convert back to numpy array
 
-                gt_predict = torch.from_numpy(gt_predict).float()
-                gt_predict = F.interpolate(gt_predict.unsqueeze(0), size=(119, 159), mode='nearest').squeeze(0)
-                gt_predict = gt_predict.long().numpy()  # Convert back to numpy array
+                    pred_predict = torch.from_numpy(pred_predict).float()
+                    pred_predict = F.interpolate(pred_predict.unsqueeze(0), size=(119, 159), mode='nearest').squeeze(0)
+                    pred_predict = pred_predict.long().numpy()
 
-                pred_predict = torch.from_numpy(pred_predict).float()
-                pred_predict = F.interpolate(pred_predict.unsqueeze(0), size=(119, 159), mode='nearest').squeeze(0)
-                pred_predict = pred_predict.long().numpy()
+                    valid_gt_pixels = gt_predict[resized_mask_np]
+                    valid_pred_pixels = pred_predict[resized_mask_np]
 
-                valid_gt_pixels = gt_predict[resized_mask_np]
-                valid_pred_pixels = pred_predict[resized_mask_np]
-
-                accuracy = calculate_accuracy(valid_gt_pixels, valid_pred_pixels)
-                iou = calculate_iou(valid_gt_pixels, valid_pred_pixels, 7)
-                
-                accuracy_accum += [accuracy]
-                iou_accum += [iou]
+                    accuracy = calculate_accuracy(valid_gt_pixels, valid_pred_pixels)
+                    iou = calculate_iou(valid_gt_pixels, valid_pred_pixels, 7)
+                    
+                    accuracy_accum += [accuracy]
+                    iou_accum += [iou]
 
                 # Save all keyframes when save_results is enabled (each image separately)
                 # Check save_image_flag: [enable, interval]
                 if self.save_results and self.save_image_flag[0] == 1 and i % self.save_image_flag[1] == 0:
-                    feature_map_vis = feature_visualize_saving(feature_map)
-                    gt_feature_map_vis = feature_visualize_saving(gt_feature_map)
-
                     # Use UNMASKED version for saving (not the masked one used for evaluation)
                     ours_rgb_unmasked_np = np.asarray(ours_rgb_unmasked.detach().cpu()).squeeze().transpose((1,2,0))
-                    feature_map_vis_np = np.asarray(feature_map_vis.detach().cpu()).squeeze()
-                    gt_feature_map_vis_np = np.asarray(gt_feature_map_vis.detach().cpu()).squeeze()
 
                     # Save each image separately (not as subplot)
                     kf_idx_str = str(kf_idx).zfill(6)  # Frame index with padding (e.g., 000123)
@@ -1572,15 +1660,24 @@ class Mapper(SLAMParameters):
                     # Save rendered RGB - Undistorted version
                     cv2.imwrite(f"{render_path_undistorted}/{kf_idx_str}.png", ours_rgb_undistorted_bgr)
 
-                    # Save GT feature visualization
-                    gt_feature_bgr = cv2.cvtColor((gt_feature_map_vis_np * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
-                    cv2.imwrite(f"{gt_feature_path}/{kf_idx_str}.png", gt_feature_bgr)
+                    if semantic_eval_enabled and feature_map is not None and gt_feature_map is not None:
+                        feature_map_vis = feature_visualize_saving(feature_map)
+                        gt_feature_map_vis = feature_visualize_saving(gt_feature_map)
+                        feature_map_vis_np = np.asarray(feature_map_vis.detach().cpu()).squeeze()
+                        gt_feature_map_vis_np = np.asarray(gt_feature_map_vis.detach().cpu()).squeeze()
 
-                    # Save rendered feature visualization
-                    feature_bgr = cv2.cvtColor((feature_map_vis_np * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
-                    cv2.imwrite(f"{feature_path}/{kf_idx_str}.png", feature_bgr)
+                        # Save GT feature visualization
+                        gt_feature_bgr = cv2.cvtColor((gt_feature_map_vis_np * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                        cv2.imwrite(f"{gt_feature_path}/{kf_idx_str}.png", gt_feature_bgr)
 
-                del gt_feature_map, feature_map
+                        # Save rendered feature visualization
+                        feature_bgr = cv2.cvtColor((feature_map_vis_np * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                        cv2.imwrite(f"{feature_path}/{kf_idx_str}.png", feature_bgr)
+
+                if gt_feature_map is not None:
+                    del gt_feature_map
+                if feature_map is not None:
+                    del feature_map
                 torch.cuda.empty_cache()
             
             psnrs = np.array(psnrs)
@@ -1589,9 +1686,11 @@ class Mapper(SLAMParameters):
             accuracy_accum = np.array(accuracy_accum)
             iou_accum = np.array(iou_accum)
 
-            
-            
-            print(f"PSNR: {psnrs.mean():.2f}\nSSIM: {ssims.mean():.3f}\nLPIPS: {lpips.mean():.3f}\naccuracy: {accuracy_accum.mean():.3f}\nIOU: {iou_accum.mean():.3f} ")
+            print(f"PSNR: {psnrs.mean():.2f}\nSSIM: {ssims.mean():.3f}\nLPIPS: {lpips.mean():.3f}")
+            if len(accuracy_accum) > 0 and len(iou_accum) > 0:
+                print(f"accuracy: {accuracy_accum.mean():.3f}\nIOU: {iou_accum.mean():.3f}")
+            else:
+                print("accuracy: skipped\nIOU: skipped")
             print(f"Evaluated on {eval_keyframes}/{total_keyframes} keyframes (ratio: {self.eval_ratio})")
 
             # Write comprehensive metrics to text file
@@ -1606,15 +1705,23 @@ class Mapper(SLAMParameters):
                 f.write(f"PSNR: {psnrs.mean():.2f}\n")
                 f.write(f"SSIM: {ssims.mean():.3f}\n")
                 f.write(f"LPIPS: {lpips.mean():.3f}\n")
-                f.write(f"Accuracy: {accuracy_accum.mean():.3f}\n")
-                f.write(f"IOU: {iou_accum.mean():.3f}\n")
+                if len(accuracy_accum) > 0 and len(iou_accum) > 0:
+                    f.write(f"Accuracy: {accuracy_accum.mean():.3f}\n")
+                    f.write(f"IOU: {iou_accum.mean():.3f}\n")
+                else:
+                    f.write("Accuracy: skipped\n")
+                    f.write("IOU: skipped\n")
                 f.write(f"Evaluated on {eval_keyframes}/{total_keyframes} keyframes (ratio: {self.eval_ratio})\n\n")
 
                 # System information
                 f.write("SYSTEM INFORMATION:\n")
+                f.write(f"Run datetime (UTC): {self.run_datetime_utc}\n")
+                f.write(f"Run datetime (local): {self.run_datetime_local}\n")
                 f.write(f"Total Keyframes: {total_keyframes}\n")
                 f.write(f"Total Gaussians: {self.gaussians.get_xyz.shape[0]:,}\n")
                 f.write(f"Final training iterations: {self.train_iter}\n\n")
+                f.write("RUN MANIFEST:\n")
+                f.write("run_manifest.json\n")
 
                 # Add ATE metrics if available
                 if hasattr(self, 'ate_rmse') and self.ate_rmse is not None:

@@ -1,14 +1,16 @@
 #!/bin/bash
 
-# Usage: bash run_scannet.sh /path/to/Scannet
+# Usage: bash run_scannet.sh /path/to/Scannet [extra args...]
 if [ -z "$1" ]; then
     echo "Usage: bash run_scannet.sh <dataset_path>"
     echo "Example: bash run_scannet.sh /path/to/Scannet"
     exit 1
 fi
 
-OUTPUT_PATH="experiments"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATASET_PATH="$1"
+EXTRA_ARGS=("${@:2}")
+OUTPUT_PATH="$ROOT_DIR/experiments/scannet_scans"
 
 str_pad() {
 
@@ -68,12 +70,24 @@ run_()
     local loopclosing_global_correspondence_distance=${16}
     local loopclosing_local_correspondence_distance=${17}
     local loop_constraint_noise=${18}
-    
+
+    local scene_path="$DATASET_PATH/scans/$dataset"
+    if [ ! -d "$scene_path" ]; then
+        echo "skip missing ScanNet scene: $scene_path"
+        echo "skip missing ScanNet scene: $scene_path" >> ${result_txt}
+        return
+    fi
+    if [ ! -d "$scene_path/color" ] || [ ! -d "$scene_path/depth" ] || [ ! -d "$scene_path/pose" ]; then
+        echo "skip unextracted ScanNet scene: $scene_path"
+        echo "skip unextracted ScanNet scene: $scene_path" >> ${result_txt}
+        return
+    fi
+
     echo "run $dataset"
     echo "run $dataset" >> ${result_txt}
-    python -W ignore lego_slam.py --dataset_path $DATASET_PATH/$dataset\
+    python -W ignore "$ROOT_DIR/lego_slam.py" --dataset_path "$scene_path"\
                                     --config $config\
-                                    --output_path $OUTPUT_PATH/$dataset/init/\
+                                    --output_path "$OUTPUT_PATH/$dataset/init/"\
                                     --keyframe_th $keyframe_th\
                                     --knn_maxd $knn_maxd\
                                     --overlapped_th $overlapped_th\
@@ -96,7 +110,8 @@ run_()
                                     --loopclosing_local_correspondence_distance $loopclosing_local_correspondence_distance \
                                     --semantic_feature_init \
                                     --pretrained_encoder_path "saved/cnn_encoder_best.pth" \
-                                    --pretrained_decoder_path "saved/cnn_decoder_best.pth" >> ${result_txt}
+                                    --pretrained_decoder_path "saved/cnn_decoder_best.pth" \
+                                    "${EXTRA_ARGS[@]}" >> ${result_txt}
     wait
 }
 
@@ -118,16 +133,22 @@ run_scannet()
     local loopclosing_global_correspondence_distance=${14}
     local loopclosing_local_correspondence_distance=${15}
     local loop_constraint_noise=${16}
-    
-    run_ "scene0000_00" "configs/ScanNet/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise"
-    run_ "scene0059_00" "configs/ScanNet/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise"
-    run_ "scene0106_00" "configs/ScanNet/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise"
-    run_ "scene0169_00" "configs/ScanNet/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise"
-    run_ "scene0181_00" "configs/ScanNet/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise"
-    run_ "scene0207_00" "configs/ScanNet/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise"
+
+    local scene_root="$DATASET_PATH/scans"
+    if [ ! -d "$scene_root" ]; then
+        echo "missing ScanNet scans directory: $scene_root"
+        return 1
+    fi
+
+    for scene_dir in "$scene_root"/scene*; do
+        [ -d "$scene_dir" ] || continue
+        local scene_name
+        scene_name="$(basename "$scene_dir")"
+        run_ "$scene_name" "configs/ScanNet/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise"
+    done
 }
 
-txt_file="scannet_results.txt"
+txt_file="$ROOT_DIR/scannet_results.txt"
 
 overlapped_th=0.001
 max_correspondence_distance=0.05

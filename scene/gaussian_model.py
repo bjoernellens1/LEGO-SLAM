@@ -15,7 +15,6 @@ from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotati
 from torch import nn
 import os
 from utils.system_utils import mkdir_p
-from plyfile import PlyData, PlyElement
 from utils.sh_utils import RGB2SH
 # from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
@@ -493,6 +492,7 @@ class GaussianModel(nn.Module):
     
 
     def load_ply(self, path):
+        from plyfile import PlyData
         plydata = PlyData.read(path)
 
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
@@ -800,7 +800,11 @@ class GaussianModel(nn.Module):
 
         # ------------ KNN (torch.cdist + topk) ----------------
         dist_mat = torch.cdist(sample_xyz, sample_xyz, p=2)          # (S, S)
-        dists, nn_idx = torch.topk(dist_mat, k=k_nearest + 1, dim=1, largest=False)
+        if sample_size <= 1:
+            return
+
+        knn_k = min(k_nearest + 1, sample_size)
+        dists, nn_idx = torch.topk(dist_mat, k=knn_k, dim=1, largest=False)
         dists  = dists[:, 1:]     # (S, k), remove self
         nn_idx = nn_idx[:, 1:]    # (S, k)
 
@@ -831,6 +835,7 @@ class GaussianModel(nn.Module):
         self.denom[update_filter] += 1
         
     def save_ply(self, path):
+        from plyfile import PlyData, PlyElement
         mkdir_p(os.path.dirname(path))
 
         xyz = self._xyz.detach().cpu().numpy()

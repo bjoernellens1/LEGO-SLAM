@@ -218,6 +218,12 @@ class Options:
             help="output direcory of features",
         )
         parser.add_argument(
+            "--feature-save-stride",
+            type=int,
+            default=8,
+            help="downsample factor applied before saving feature tensors",
+        )
+        parser.add_argument(
             "--test-rgb-dir",
             help="test rgb dir",
             required=True,
@@ -476,6 +482,16 @@ def test(args):
             ###
             # save unnormalized image feature
             unnormalized_fmap = fmap[0]  # [512, h, w]
+            save_stride = max(1, int(args.feature_save_stride))
+            if save_stride > 1:
+                save_h = max(1, unnormalized_fmap.shape[1] // save_stride)
+                save_w = max(1, unnormalized_fmap.shape[2] // save_stride)
+                unnormalized_fmap = F.interpolate(
+                    unnormalized_fmap.unsqueeze(0),
+                    size=(save_h, save_w),
+                    mode="bilinear",
+                    align_corners=False,
+                ).squeeze(0)
             unnormalized_fmap = unnormalized_fmap.cpu().numpy().astype(np.float16)
             torch.save(torch.tensor(unnormalized_fmap).half(), os.path.join(outdir, os.path.splitext(impath)[0] + "_fmap_CxHxW.pt"))
 

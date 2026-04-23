@@ -13,10 +13,8 @@ import os
 import random
 import json
 from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
-from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from torch import nn
 
 class Scene(nn.Module):
@@ -43,6 +41,8 @@ class Scene(nn.Module):
         self.test_cameras = {}
 
         scene_info = None
+        from scene.dataset_readers import sceneLoadTypeCallbacks
+        from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
         
         if self.slam:
             print("SLAM mode")

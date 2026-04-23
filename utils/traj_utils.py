@@ -185,7 +185,10 @@ class TrajManager:
                 lines = f.readlines()
             ls = []
             for line in lines:
-                l = list(map(float, line.split(' ')))
+                line = line.strip()
+                if not line:
+                    continue
+                l = list(map(float, line.split()))
                 ls.append(l)
             c2w = np.array(ls).reshape(4, 4)
             # ScanNet coordinate system adjustment (same as nice-slam)

@@ -247,10 +247,12 @@ class SharedTargetPoints(nn.Module):
 class SharedCam(nn.Module):
     def __init__(self, FoVx, FoVy, image, depth_image, semantic_feature,
                  cx, cy, fx, fy,
-                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, dataset_path=None):
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, dataset_path=None,
+                 use_semantic_features=True):
         super().__init__()
         
         self.device = "cuda"
+        self.use_semantic_features = use_semantic_features
         self.cam_idx = torch.zeros((1)).int()
         self.R = torch.eye(3,3).float()
         self.t = torch.zeros((3)).float()
@@ -273,7 +275,7 @@ class SharedCam(nn.Module):
         self.semantic_feature_name[:self.semantic_feature_name_size[0]] = semantic_feature
         
         # Load semantic feature immediately and store it
-        if dataset_path is not None:
+        if dataset_path is not None and self.use_semantic_features:
             semantic_feature_path = f"{dataset_path}/rgb_feature_langseg/{self.get_semantic_feature_name()}"
             self.semantic_feature_image = torch.load(semantic_feature_path, map_location='cpu').half()
         else:
@@ -409,7 +411,7 @@ class SharedCam(nn.Module):
         self.semantic_feature_name[:self.semantic_feature_name_size[0]] = semantic_feature
         
 
-        if self.dataset_path is not None:
+        if self.dataset_path is not None and self.use_semantic_features and self.semantic_feature_image is not None:
             semantic_feature_path = f"{self.dataset_path}/rgb_feature_langseg/{self.get_semantic_feature_name()}"
             self.semantic_feature_image[:,:,:] = torch.load(semantic_feature_path, map_location='cpu').half()
 
@@ -585,5 +587,4 @@ class CNN_decoder(nn.Module):
         self.conv1_invmatrix[:,:] = torch.linalg.pinv(self.conv1.weight.data.squeeze(-1).squeeze(-1))
         self.conv2_invmatrix[:,:] = torch.linalg.pinv(self.conv2.weight.data.squeeze(-1).squeeze(-1))
         return
-
 
