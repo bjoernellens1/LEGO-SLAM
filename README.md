@@ -64,6 +64,28 @@ python setup.py install
 
 ---
 
+## Storage Layout
+On this hub, `/home/jovyan/work` and `/tmp` are ephemeral. Use them only for scratch work, builds, and temporary exports.
+
+Recommended placement:
+
+| Path | Use for | Keep there? |
+| --- | --- | --- |
+| `/home/jovyan/shared` | Raw datasets, `rgb_feature_langseg/`, checkpoints, logs, rendered outputs | Yes, this is the durable RWX mount |
+| `/home/jovyan/work` | Repo checkout, submodule builds, compile artifacts, temporary feature generation | No, it is ephemeral |
+| `/tmp` | Fast scratch space, small benchmarks, transient unpacking | No, it is ephemeral |
+
+Repo-specific guidance:
+
+- Put large datasets outside the repo, ideally under `/home/jovyan/shared`.
+- Keep `saved/` outputs and pretrained weights on `/home/jovyan/shared` if you want them to survive restarts.
+- Keep `submodules/fast_gicp/build`, `submodules/diff-gaussian-rasterization-feature` build outputs, and any `cmake`/`make` artifacts on `/home/jovyan/work` or `/tmp`.
+- If you regenerate semantic features, write them to an ephemeral mount first only if you immediately copy them to `/home/jovyan/shared`.
+
+<br>
+
+---
+
 ## Datasets
 
 ### Download

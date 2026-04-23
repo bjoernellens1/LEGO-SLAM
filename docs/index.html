@@ -346,6 +346,53 @@ uv pip install opencv-contrib-python lpips plyfile rerun-sdk==0.17.0 timm evo \
 
 
 
+<!-- Storage note -->
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3 has-text-centered">Storage Layout</h2>
+        <div class="content has-text-justified">
+          <p>
+            On this hub, <code>/home/jovyan/work</code> and <code>/tmp</code> are ephemeral. Use them for scratch work and builds only.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Path</th>
+                <th>Use for</th>
+                <th>Persist?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/home/jovyan/shared</code></td>
+                <td>Raw datasets, <code>rgb_feature_langseg/</code>, checkpoints, logs, rendered outputs</td>
+                <td>Yes, durable RWX mount</td>
+              </tr>
+              <tr>
+                <td><code>/home/jovyan/work</code></td>
+                <td>Repo checkout, submodule builds, compile artifacts, temporary feature generation</td>
+                <td>No, ephemeral</td>
+              </tr>
+              <tr>
+                <td><code>/tmp</code></td>
+                <td>Fast scratch space, benchmarks, transient unpacking</td>
+                <td>No, ephemeral</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            Keep large datasets and generated features outside the repo, and store any outputs you want to keep under <code>/home/jovyan/shared</code>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- End Storage note -->
+
+
 <!-- Paper abstract -->
 <section class="section hero is-light">
   <div class="container is-max-desktop">
