@@ -22,22 +22,9 @@
   <div align="center"></div>
 </p>
 
-<p align="center">
-  <img src="./media/readme.gif" alt="LEGO-SLAM Demo" width="100%">
-</p>
-<p align="center">
-  LEGO-SLAM running at 15 FPS on a ScanNet scene with language-based loop closing for drift correction.
-</p>
-
-<br>
-
 ---
 
 ## Method Overview
-<p align="center">
-  <img src="./media/overview.png" alt="LEGO-SLAM Overview" width="100%">
-</p>
-
 LEGO-SLAM is a 3DGS-based SLAM framework that supports open-vocabulary semantic querying and rendering. It tracks via G-ICP and efficiently builds a map by embedding Gaussians with scene-adaptive 16D language features. Map management is achieved through Language Pruning and Language-Based Loop Detection. The generated map enables open-vocabulary 3D Object Localization.
 
 <br>

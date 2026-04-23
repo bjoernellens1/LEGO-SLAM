@@ -307,53 +307,15 @@
 
 <section class="hero is-small">
   <div class="hero-body">
-    <div class="container">
-      <div id="results-carousel" class="carousel results-carousel">
-        <div class="item">
-          <video poster="" controls muted loop preload="metadata">
-            <source src="static/videos/outdoor.mp4" type="video/mp4">
-          </video>
-          <h2 class="subtitle has-text-centered">
-            Real-World Outdoor Scene
-          </h2>
-        </div>
-        <div class="item">
-          <video poster="" controls muted loop preload="metadata">
-            <source src="static/videos/indoor.mp4" type="video/mp4">
-          </video>
-          <h2 class="subtitle has-text-centered">
-            Real-World Indoor Scene
-          </h2>
-        </div>
-        <div class="item">
-          <video poster="" controls muted loop preload="metadata">
-            <source src="static/videos/replica.mp4" type="video/mp4">
-          </video>
-          <h2 class="subtitle has-text-centered">
-            Replica Scene
-          </h2>
-        </div>
-        <div class="item">
-          <video poster="" controls muted loop preload="metadata">
-            <source src="static/videos/tum.mp4" type="video/mp4">
-          </video>
-          <h2 class="subtitle has-text-centered">
-            TUM Scene
-          </h2>
-        </div>
-        <div class="item">
-          <video poster="" controls muted loop preload="metadata">
-            <source src="static/videos/scannet.mp4" type="video/mp4">
-          </video>
-          <h2 class="subtitle has-text-centered">
-            ScanNet Scene
-          </h2>
-        </div>
-      </div>
+    <div class="container has-text-centered">
+      <p>
+        Media assets were removed from this repository to keep the Git history small.
+        See the README and paper for a text summary of the system and results.
+      </p>
     </div>
   </div>
 </section>
-<!-- End video carousel -->
+<!-- End media note -->
 
 
 
@@ -385,9 +347,6 @@
     <div class="columns is-centered">
       <div class="column is-four-fifths">
         <h2 class="title is-3 has-text-centered">System Overview</h2>
-        <div class="publication-banner">
-          <img src="static/images/fig_method.png" alt="LEGO-SLAM Overview" class="center">
-        </div>
         <div class="content has-text-justified">
           <p>
             The system takes RGB-D input to concurrently perform tracking and mapping. The Tracking module estimates camera poses via geometric alignment (G-ICP) directly against the 3D Gaussian map. The Mapping module constructs the scene using 3D Gaussians enriched with compact 16-dimensional language features, distilled via our scene-adaptive encoder to ensure real-time performance. To maintain map efficiency, the system incorporates Language-Guided Pruning to remove semantically redundant primitives. Furthermore, it employs Language-Based Loop Detection to correct long-term drift by efficiently reusing the compact mapping features, minimizing computational overhead.
