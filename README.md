@@ -32,35 +32,32 @@ LEGO-SLAM is a 3DGS-based SLAM framework that supports open-vocabulary semantic 
 ---
 
 ## Environments
-Install requirements
+For JupyterHub or any shared machine, create the conda env in your home directory so it persists across sessions.
 ```bash
-conda create -n lego_slam python==3.9
-conda activate lego_slam
-conda install pytorch==2.0.0 torchvision==0.15.0 torchaudio==2.0.0 pytorch-cuda=11.8 -c pytorch -c nvidia
-conda install lightning -c conda-forge
-pip install --no-build-isolation -r requirements.txt
-```
-Also, PCL is needed for fast-gicp submodule.
-```bash
-sudo apt install libpcl-dev
+mamba create -y -p ~/.conda/envs/lego_slam python=3.10 pip
+conda activate ~/.conda/envs/lego_slam
+mamba install -y -p ~/.conda/envs/lego_slam -c pytorch -c nvidia -c conda-forge \
+  pytorch==2.0.0 torchvision==0.15.0 torchaudio==2.0.0 pytorch-cuda=11.8 \
+  open3d scipy tqdm torchmetrics=0.11.4 lightning pcl=1.14.0 python-pcl=0.3.0rc1 \
+  gtsam 'numpy<2'
+uv pip install opencv-contrib-python lpips plyfile rerun-sdk==0.17.0 timm evo \
+  git+https://github.com/openai/CLIP.git \
+  git+https://github.com/zhanghang1989/PyTorch-Encoding/
 ```
 Install submodules
 
 ```bash
-conda activate lego_slam
-pip install --no-build-isolation submodules/diff-gaussian-rasterization-feature
+conda activate ~/.conda/envs/lego_slam
+uv pip install --no-build-isolation submodules/diff-gaussian-rasterization-feature
 
 cd submodules/fast_gicp
 mkdir build
 cd build
-cmake ..
+cmake -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" ..
 make
-sudo make install
+make install
 cd ..
 python setup.py install
-
-# gtsam
-conda install conda-forge::gtsam
 ```
 
 <br>
