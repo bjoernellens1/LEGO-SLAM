@@ -7,8 +7,10 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-OUTPUT_PATH="experiments"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUTPUT_PATH="$ROOT_DIR/experiments"
 DATASET_PATH="$1"
+EXTRA_ARGS=("${@:2}")
 
 
 str_pad() {
@@ -74,7 +76,7 @@ run_()
     echo "run $dataset"
     echo "" >> ${result_txt}
     echo "run $dataset" >> ${result_txt}
-    python -W ignore lego_slam.py --dataset_path $DATASET_PATH/$dataset\
+    python -W ignore "$ROOT_DIR/lego_slam.py" --dataset_path $DATASET_PATH/$dataset\
                                     --config $config\
                                     --output_path $OUTPUT_PATH/$dataset/init/\
                                     --keyframe_th $keyframe_th\
@@ -100,7 +102,8 @@ run_()
                                     --semantic_feature_init \
                                     --pretrained_encoder_path "saved/cnn_encoder_best.pth" \
                                     --pretrained_decoder_path "saved/cnn_decoder_best.pth" \
-                                    --rerun_viewer
+                                    --rerun_viewer \
+                                    "${EXTRA_ARGS[@]}"
     wait
 }
 
@@ -134,7 +137,7 @@ run_replica()
     run_ "office4" "configs/Replica/caminfo.txt" "$result_txt" "$keyframe_th" "$knn_maxd" "$overlapped_th" "$max_correspondence_distance" "$trackable_opacity_th" "$overlapped_th2" "$downsample_rate" "$post_training_iter" "$eval_ratio" "$edge_weight" "$n_trackable_keyframes" "$pose_lr_rate" "$loopclosing_global_correspondence_distance" "$loopclosing_local_correspondence_distance" "$loop_constraint_noise" "$loop_closing_start"
 }
 
-txt_file="replica_results.txt"
+txt_file="$ROOT_DIR/replica_results.txt"
 
 overlapped_th=1e-3
 max_correspondence_distance=0.02

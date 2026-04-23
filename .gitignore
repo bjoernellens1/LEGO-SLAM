@@ -2,3 +2,14 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+**/.ipynb_checkpoints/
+docs/.DS_Store
+docs/index.html
+encoding/__pycache__/
+data/
+experiments/
+output/
+saved/
+*.log
+*_results.txt
+Lseg/*.ckpt

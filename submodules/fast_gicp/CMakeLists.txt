@@ -8,7 +8,7 @@ option(BUILD_PYTHON_BINDINGS "Build python bindings" OFF)
 
 set(CMAKE_BUILD_TYPE "Release")
 
-find_package(PCL REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common filters io kdtree registration search)
 find_package(Eigen3 REQUIRED)
 add_definitions(${PCL_DEFINITIONS})
 
@@ -52,7 +52,7 @@ endif()
 ## Build ##
 ###########
 
-add_library(fast_gicp SHARED
+add_library(fast_gicp STATIC
   src/fast_gicp/gicp/lsq_registration.cpp
   src/fast_gicp/gicp/fast_gicp.cpp
   src/fast_gicp/gicp/fast_gicp_st.cpp

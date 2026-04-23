@@ -48,6 +48,8 @@ class CMakeBuild(build_ext):
             "-DPYTHON_EXECUTABLE={}".format(sys.executable),
             "-DEXAMPLE_VERSION_INFO={}".format(self.distribution.get_version()),
             "-DCMAKE_BUILD_TYPE={}".format(cfg),  # not used on MSVC, but no harm,
+            "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+            "-DBUILD_apps=OFF",
             # "-DBUILD_VGICP_CUDA=ON",
             "-DBUILD_PYTHON_BINDINGS=ON",
         ]

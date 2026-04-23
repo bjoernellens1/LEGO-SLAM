@@ -7,8 +7,12 @@ import cv2
 import numpy as np
 import open3d as o3d
 import time
-import rerun as rr
-import rerun.blueprint as rrb
+try:
+    import rerun as rr
+    import rerun.blueprint as rrb
+except ModuleNotFoundError:
+    rr = None
+    rrb = None
 
 # Set PYTHONPATH for multiprocessing
 current_dir = os.path.dirname(__file__)
@@ -57,8 +61,10 @@ class LEGO_SLAM(SLAMParameters):
         self.save_results = args.save_results
         self.save_image_flag = args.save_image_flag
         self.rerun_viewer = args.rerun_viewer
-        self.speedup = args.speedup
-        self.semantic_feature_init = args.semantic_feature_init
+        self.disable_embeddings = args.disable_embeddings
+        self.use_embeddings = not self.disable_embeddings
+        self.speedup = args.speedup and self.use_embeddings
+        self.semantic_feature_init = args.semantic_feature_init and self.use_embeddings
         self.max_mapping_keyframes = int(args.max_mapping_keyframes)
         self.post_training_iter = int(args.post_training_iter)
         self.eval_ratio = float(args.eval_ratio)
@@ -82,7 +88,16 @@ class LEGO_SLAM(SLAMParameters):
         self.loopclosing_local_correspondence_distance = float(args.loopclosing_local_correspondence_distance)
         self.loop_constraint_noise = float(args.loop_constraint_noise)
         self.loop_closing_start = int(args.loop_closing_start)
+        self.enable_loop_closing = args.enable_loop_closing and self.use_embeddings
+
+        if self.disable_embeddings:
+            if args.speedup or args.semantic_feature_init or args.enable_loop_closing:
+                print("Embeddings disabled: forcing semantic feature init, speedup, and loop closing OFF")
+            self.encoder_flag = 0
         
+        if self.rerun_viewer and rr is None:
+            raise ModuleNotFoundError("rerun is required when --rerun_viewer is enabled")
+
         if self.rerun_viewer:
             rr.init("3dgsviewer", spawn=True)
             # Set white background
@@ -124,7 +139,8 @@ class LEGO_SLAM(SLAMParameters):
         # Shared objects
         self.shared_cam = SharedCam(FoVx=focal2fov(self.fx, self.W), FoVy=focal2fov(self.fy, self.H),
                                     image=test_rgb_img, depth_image=test_depth_img, semantic_feature = test_semantic_feature_name_tensor,
-                                    cx=self.cx, cy=self.cy, fx=self.fx, fy=self.fy, dataset_path=self.dataset_path)
+                                    cx=self.cx, cy=self.cy, fx=self.fx, fy=self.fy, dataset_path=self.dataset_path,
+                                    use_semantic_features=self.use_embeddings)
         self.shared_new_points = SharedPoints(test_points.shape[0])
         self.shared_new_gaussians = SharedGaussians(test_points.shape[0])
         self.shared_target_gaussians = SharedTargetPoints(10000000)
@@ -164,9 +180,7 @@ class LEGO_SLAM(SLAMParameters):
         self.refined_pose_shared.share_memory_()
         
         self.demo[0] = args.demo
-        
-        # Loop closing configuration from arguments
-        self.enable_loop_closing = args.enable_loop_closing
+
         self.mapper = Mapper(self)
         self.tracker = Tracker(self)
         if self.enable_loop_closing:
@@ -409,6 +423,8 @@ if __name__ == "__main__":
     parser.add_argument("--semantic_feature_dim", default=512)
     parser.add_argument("--point_feature_dim", default=16) 
     parser.add_argument("--semantic_feature_init", action="store_true", default=False)
+    parser.add_argument("--disable_embeddings", action="store_true", default=False,
+                        help="disable semantic feature loading/supervision for RGB-D-only comparison runs")
     
     ## System Parameters
     # if you limited the memory, change the max_mapping_keyframes to a smaller value
@@ -449,6 +465,8 @@ if __name__ == "__main__":
     parser.add_argument("--loop_closing_start", default=25)
 
     args = parser.parse_args()
+    if not os.path.isabs(args.output_path):
+        args.output_path = os.path.join(current_dir, args.output_path)
 
     lego_slam = LEGO_SLAM(args)
     # lego_slam.SLAM(1)
