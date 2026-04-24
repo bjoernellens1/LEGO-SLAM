@@ -8,15 +8,20 @@ if [ -z "$1" ]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_PATH="$ROOT_DIR/experiments"
+# Keep long-running outputs on shared storage so they survive workspace cleanup.
+OUTPUT_PATH="${OUTPUT_PATH:-/home/jovyan/shared/LEGO-SLAM-experiments}"
 DATASET_PATH="$1"
 EXTRA_ARGS=()
 RUN_DENSE_DEBUG=0
+DISABLE_EMBEDDINGS=0
 
 for arg in "${@:2}"; do
     case "$arg" in
         --dense_debug)
             RUN_DENSE_DEBUG=1
+            ;;
+        --disable_embeddings)
+            DISABLE_EMBEDDINGS=1
             ;;
         *)
             EXTRA_ARGS+=("$arg")
@@ -82,6 +87,7 @@ run_() {
     local loopclosing_local_correspondence_distance=${18}
     local loop_constraint_noise=${19}
     local max_mapping_keyframes=${20}
+    local extra_flags=("${EXTRA_ARGS[@]}")
 
     echo "run $dataset_name" >> "${result_txt}"
     python -W ignore "$ROOT_DIR/lego_slam.py" \
@@ -108,11 +114,8 @@ run_() {
         --loop_constraint_noise "$loop_constraint_noise" \
         --max_mapping_keyframes "$max_mapping_keyframes" \
         --edge_weight "$edge_weight" \
-        >> "${result_txt}" \
-        --semantic_feature_init \
-        --pretrained_encoder_path "saved/cnn_encoder_best.pth" \
-        --pretrained_decoder_path "saved/cnn_decoder_best.pth" \
-        "${EXTRA_ARGS[@]}"
+        "${extra_flags[@]}" \
+        >> "${result_txt}"
     wait
 }
 
@@ -167,6 +170,10 @@ if [ "$RUN_DENSE_DEBUG" -eq 1 ]; then
     downsample_rate=2
     n_trackable_keyframes=300
     max_mapping_keyframes=400
+fi
+
+if [ "$DISABLE_EMBEDDINGS" -eq 1 ]; then
+    EXTRA_ARGS=(--disable_embeddings "${EXTRA_ARGS[@]}")
 fi
 
 if [ "$RUN_DENSE_DEBUG" -eq 1 ]; then
